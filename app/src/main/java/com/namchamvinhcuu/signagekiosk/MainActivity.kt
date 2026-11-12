@@ -52,7 +52,14 @@ class MainActivity : Activity() {
     private lateinit var store: ConfigStore
     private lateinit var config: KioskConfig
     private lateinit var events: EventLogger
+    private lateinit var secrets: SecretStore
     private lateinit var root: FrameLayout
+
+    /** The paired player URL (carries the token: NEVER log it, only [UrlRedactor.redactUrl]); null = not paired. */
+    private var pairedUrl: String? = null
+
+    /** A paired URL whose storing failed (in memory only, same secrecy as [pairedUrl]). */
+    private var unstorableUrl: String? = null
 
     private var webView: WebView? = null
     private var settingsDialog: AlertDialog? = null
@@ -86,7 +93,7 @@ class MainActivity : Activity() {
     }
     private val retryLoad = Runnable {
         KLog.i("retrying main-frame load")
-        webView?.loadUrl(config.pairUrl)
+        webView?.loadUrl(startUrl())
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -94,11 +101,13 @@ class MainActivity : Activity() {
         createdAtMs = SystemClock.elapsedRealtime()
         KLog.init(this)
         store = ConfigStore(this)
+        secrets = SecretStore(this)
         installCrashLogger(store)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         config = store.load()
         events = EventLogger()
+        pairedUrl = loadPairedUrl()
 
         root = FrameLayout(this)
         root.setBackgroundColor(Color.BLACK)
@@ -218,7 +227,33 @@ class MainActivity : Activity() {
 
     private fun loadConfiguredUrl() {
         handler.removeCallbacks(retryLoad)
-        webView?.loadUrl(config.pairUrl)
+        webView?.loadUrl(startUrl())
+    }
+
+    /** The stored player URL when paired, else the pairing page: a paired TV never goes back to `/signage/pair`. */
+    private fun startUrl(): String = pairedUrl ?: config.pairUrl
+
+    /** The stored URL, only while it still belongs to the configured server; anything else is dropped. */
+    private fun loadPairedUrl(): String? {
+        val stored = secrets.load() ?: return null
+        if (PairingPolicy.isPairedUrl(config.baseUrl, stored)) return stored
+        KLog.w("stored paired url does not belong to the configured server, dropped")
+        secrets.clear()
+        return null
+    }
+
+    /** Main-frame URL seen by the WebView: the first one that is the player URL of this server becomes the paired session. */
+    private fun onMainFrameUrl(view: WebView, url: String?) {
+        if (view !== webView || url == null || url == pairedUrl || url == unstorableUrl) return
+        if (!PairingPolicy.isPairedUrl(config.baseUrl, url)) return
+        if (secrets.save(url)) {
+            pairedUrl = url
+            events.event("app_paired", mapOf("url" to UrlRedactor.redactUrl(url)))
+        } else {
+            // Do not retry the Keystore on every page callback for the same URL.
+            unstorableUrl = url
+            KLog.w("paired url could not be stored; the TV will pair again after a restart")
+        }
     }
 
     /** R2: a dead WebView only gets removed and destroyed — nothing else is called on it. */
@@ -274,6 +309,11 @@ class MainActivity : Activity() {
             if (current && started) recover("render_gone") else discardWebView(view)
             return true
         }
+
+        // Whether a server redirect fires onPageStarted again is not documented: look at both callbacks.
+        override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) = onMainFrameUrl(view, url)
+
+        override fun onPageFinished(view: WebView, url: String?) = onMainFrameUrl(view, url)
 
         // R8: one pending retry at a time.
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -397,6 +437,12 @@ class MainActivity : Activity() {
         reloadAllowed: Boolean = true,
     ) {
         val urlChanged = next.baseUrl != config.baseUrl
+        if (urlChanged) {
+            // The token belongs to the old server: never send the TV to the new one with it.
+            secrets.clear()
+            pairedUrl = null
+            unstorableUrl = null
+        }
         if (next != config) {
             if (!store.save(next)) KLog.w("config save did not commit")
             config = next
