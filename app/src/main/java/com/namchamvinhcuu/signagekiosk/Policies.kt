@@ -77,6 +77,7 @@ object RefrontPolicy {
         if (alreadyTried || restarting || sinceCreateMs !in 0 until WINDOW_MS) return false
         return prevExitReason == RestartPolicy.Reason.PERIODIC.wire ||
             prevExitReason == RestartPolicy.Reason.LOW_MEMORY.wire ||
+            prevExitReason == BridgePolicy.RESTART_REASON ||
             prevExitReason?.startsWith(EscalationGuard.ESCALATION_PREFIX) == true
     }
 }

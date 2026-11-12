@@ -38,7 +38,14 @@ class ConfigStore(context: Context) {
         return ExitRecord(reason, at)
     }
 
+    /** Wall-clock time of the last restart a page asked for through the bridge; survives the restart it causes. */
+    fun lastBridgeRestartAtWallMs(): Long? = if (prefs.contains(K_BRIDGE_RESTART_AT)) prefs.getLong(K_BRIDGE_RESTART_AT, 0L) else null
+
+    /** Synchronous on purpose: the process exits right after this call. */
+    fun saveBridgeRestartAt(atWallMs: Long): Boolean = prefs.edit().putLong(K_BRIDGE_RESTART_AT, atWallMs).commit()
+
     private companion object {
+        const val K_BRIDGE_RESTART_AT = "bridge_restart_at"
         const val K_BASE_URL = "base_url"
         const val K_RESTART_MIN = "restart_min"
         const val K_LOW_MEM_MB = "low_mem_mb"

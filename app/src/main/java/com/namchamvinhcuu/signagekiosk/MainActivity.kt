@@ -40,7 +40,7 @@ import java.time.Instant
 
 /**
  * Full-screen kiosk WebView on the signage player page: recovers from renderer death and hangs,
- * restarts its own process periodically / on low memory / after repeated recoveries, logs locally (remote log is a later plan step).
+ * restarts its own process periodically / on low memory / after repeated recoveries, logs locally and, once paired, to the server.
  * All timers run on the main looper and only while the activity is started (foreground).
  */
 class MainActivity : Activity() {
@@ -65,6 +65,18 @@ class MainActivity : Activity() {
     /** The player URL the server just refused with 403 (in memory only, same secrecy as [pairedUrl]). */
     private var forbiddenUrl: String? = null
     private val authFailures = AuthFailurePolicy()
+
+    /** Cached gate of the page bridge (see [BridgePolicy]); the actions re-check on the main thread. */
+    @Volatile private var bridgeOpen = false
+    private var lastRecheckMs: Long? = null
+    private val bridge = KioskBridge(
+        allowed = { bridgeOpen },
+        memory = ::bridgeMemoryJson,
+        info = ::bridgeInfoJson,
+        onRestart = { handler.post { onBridgeRestart() } },
+        onAuthRevoked = { handler.post { onBridgeAuthRevoked() } },
+        log = { msg, e -> KLog.e(msg, e) },
+    )
 
     private var webView: WebView? = null
     private var settingsDialog: AlertDialog? = null
@@ -111,7 +123,9 @@ class MainActivity : Activity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         config = store.load()
-        events = EventLogger()
+        events = EventLogger(
+            RemoteLogger({ RemoteLogPolicy.endpoint(config.baseUrl, pairedUrl) }, remoteSender, remoteLimiter, remoteClock),
+        )
         pairedUrl = loadPairedUrl()
 
         root = FrameLayout(this)
@@ -223,6 +237,8 @@ class MainActivity : Activity() {
         wv.settings.userAgentString = "${wv.settings.userAgentString} SignageKiosk/${BuildConfig.VERSION_NAME}"
         wv.webViewClient = KioskWebViewClient()
         wv.webChromeClient = KioskChromeClient()
+        // Injected into every frame on the next page load; usable only while [bridgeOpen] (BridgePolicy).
+        wv.addJavascriptInterface(bridge, "SignageKiosk")
         root.addView(wv, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         webView = wv
         hang.reset()
@@ -280,16 +296,83 @@ class MainActivity : Activity() {
                 secrets.clear()
                 pairedUrl = null
                 unstorableUrl = null
+                bridgeOpen = false
                 events.event("app_auth_revoked", mapOf("url" to UrlRedactor.redactUrl(url)))
                 loadConfiguredUrl()
             }
         }
     }
 
+    // ---- Page bridge window.SignageKiosk (see KioskBridge, BridgePolicy) ------------------------------
+
+    /** Called after [onMainFrameUrl] so a freshly stored session already counts. */
+    private fun updateBridgeGate(view: WebView, url: String?) {
+        if (view === webView) bridgeOpen = BridgePolicy.isAllowed(config.baseUrl, pairedUrl, url)
+    }
+
+    /** Main-thread re-check for the two actions: the live main-frame URL, not the cached flag. */
+    private fun bridgeAllowedNow(): Boolean = BridgePolicy.isAllowed(config.baseUrl, pairedUrl, webView?.url)
+
+    private fun onBridgeRestart() {
+        // Like every other restart: none while stopped (a background activity start is blocked on Android 10+).
+        if (!started || !bridgeAllowedNow()) return
+        if (!BridgePolicy.restartAllowed(uptimeMs())) {
+            KLog.w("bridge restart ignored: process is younger than ${BridgePolicy.MIN_UPTIME_FOR_RESTART_MS / 60_000L} min")
+            return
+        }
+        val nowWall = System.currentTimeMillis()
+        if (!BridgePolicy.restartCooldownPassed(nowWall, store.lastBridgeRestartAtWallMs())) {
+            KLog.w("bridge restart ignored: the last one was less than ${BridgePolicy.MIN_RESTART_GAP_MS / 60_000L} min ago")
+            return
+        }
+        // Saved before the restart: the process exits right after, and a looping caller must still be held back.
+        if (!store.saveBridgeRestartAt(nowWall)) {
+            KLog.w("bridge restart ignored: cooldown could not be stored")
+            return
+        }
+        restartProcess(BridgePolicy.RESTART_REASON)
+    }
+
+    /**
+     * The player saw repeated 403s on its own requests. Not trusted as proof: the stored URL is reloaded and the real
+     * main-frame answer goes through [AuthFailurePolicy] (a revoked TV is back at pairing after about a minute).
+     */
+    private fun onBridgeAuthRevoked() {
+        if (!bridgeAllowedNow()) return
+        val now = SystemClock.elapsedRealtime()
+        if (!BridgePolicy.recheckAllowed(now, lastRecheckMs)) return
+        lastRecheckMs = now
+        events.event("app_bridge_auth_revoked", mapOf("url" to UrlRedactor.redactUrl(pairedUrl)))
+        loadConfiguredUrl()
+    }
+
+    private fun bridgeMemoryJson(): String {
+        val mem = memoryInfo()
+        return BridgePolicy.memoryJson(mem.availMem / MB, mem.totalMem / MB, mem.lowMemory, Debug.getPss() / 1024, uptimeMs() / 60_000L)
+    }
+
+    private fun bridgeInfoJson(): String {
+        val metrics = resources.displayMetrics
+        val view = webView
+        @Suppress("DEPRECATION")
+        val rotation = windowManager.defaultDisplay.rotation
+        return BridgePolicy.infoJson(
+            BuildConfig.VERSION_NAME,
+            BuildConfig.VERSION_CODE,
+            view?.width?.takeIf { it > 0 } ?: metrics.widthPixels,
+            view?.height?.takeIf { it > 0 } ?: metrics.heightPixels,
+            metrics.densityDpi,
+            metrics.density.toDouble(),
+            rotation,
+            WebView.getCurrentWebViewPackage()?.versionName,
+        )
+    }
+
     /** R2: a dead WebView only gets removed and destroyed — nothing else is called on it. */
     private fun discardWebView(view: WebView) {
         if (view === webView) {
             webView = null
+            bridgeOpen = false
             handler.removeCallbacks(retryLoad)
         }
         root.removeView(view)
@@ -341,9 +424,15 @@ class MainActivity : Activity() {
         }
 
         // Whether a server redirect fires onPageStarted again is not documented: look at both callbacks.
-        override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) = onMainFrameUrl(view, url)
+        override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+            onMainFrameUrl(view, url)
+            updateBridgeGate(view, url)
+        }
 
-        override fun onPageFinished(view: WebView, url: String?) = onMainFrameUrl(view, url)
+        override fun onPageFinished(view: WebView, url: String?) {
+            onMainFrameUrl(view, url)
+            updateBridgeGate(view, url)
+        }
 
         // Revocation: the server answers 403 for a regenerated token. A 403 is not a load error (onReceivedError).
         // The count uses only this callback (no ordering against onPageStarted/onPageFinished is assumed).
@@ -480,6 +569,7 @@ class MainActivity : Activity() {
             pairedUrl = null
             unstorableUrl = null
             forbiddenUrl = null
+            bridgeOpen = false
             authFailures.reset()
         }
         if (next != config) {
@@ -677,6 +767,11 @@ class MainActivity : Activity() {
         private const val MB = 1024L * 1024L
 
         private var crashLoggerInstalled = false
+
+        // Process-wide: an Activity re-creation must not reset the 20/min window or leave a second sender thread.
+        private val remoteClock = { SystemClock.elapsedRealtime() }
+        private val remoteLimiter = RemoteLogRateLimiter()
+        private val remoteSender = RemoteLogSender({ KLog.w(it) }, remoteLimiter, remoteClock)
 
         /** Logs an uncaught exception locally and saves it as the exit reason, then lets the process die. */
         private fun installCrashLogger(store: ConfigStore) {
