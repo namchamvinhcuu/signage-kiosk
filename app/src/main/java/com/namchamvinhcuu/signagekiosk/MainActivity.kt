@@ -27,6 +27,7 @@ import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.EditText
@@ -60,6 +61,10 @@ class MainActivity : Activity() {
 
     /** A paired URL whose storing failed (in memory only, same secrecy as [pairedUrl]). */
     private var unstorableUrl: String? = null
+
+    /** The player URL the server just refused with 403 (in memory only, same secrecy as [pairedUrl]). */
+    private var forbiddenUrl: String? = null
+    private val authFailures = AuthFailurePolicy()
 
     private var webView: WebView? = null
     private var settingsDialog: AlertDialog? = null
@@ -244,15 +249,40 @@ class MainActivity : Activity() {
 
     /** Main-frame URL seen by the WebView: the first one that is the player URL of this server becomes the paired session. */
     private fun onMainFrameUrl(view: WebView, url: String?) {
-        if (view !== webView || url == null || url == pairedUrl || url == unstorableUrl) return
+        if (view !== webView || url == null || url == pairedUrl || url == unstorableUrl || url == forbiddenUrl) return
         if (!PairingPolicy.isPairedUrl(config.baseUrl, url)) return
         if (secrets.save(url)) {
             pairedUrl = url
+            forbiddenUrl = null
             events.event("app_paired", mapOf("url" to UrlRedactor.redactUrl(url)))
         } else {
             // Do not retry the Keystore on every page callback for the same URL.
             unstorableUrl = url
             KLog.w("paired url could not be stored; the TV will pair again after a restart")
+        }
+    }
+
+    /**
+     * Main-frame 403 on a player URL of this server. Only a repeated one counts (see [AuthFailurePolicy]): retry the
+     * stored URL after [LOAD_RETRY_MS], and on the last one drop the session and go back to `/signage/pair`.
+     * The URL that was refused is remembered so the finishing error page cannot store it again.
+     */
+    private fun onPlayerForbidden(url: String?) {
+        if (url == null || !PairingPolicy.isPairedUrl(config.baseUrl, url)) return
+        when (authFailures.onMainFrame403(SystemClock.elapsedRealtime())) {
+            AuthFailurePolicy.Decision.RETRY -> {
+                events.event("app_auth_403", mapOf("url" to UrlRedactor.redactUrl(url)))
+                handler.removeCallbacks(retryLoad)
+                handler.postDelayed(retryLoad, LOAD_RETRY_MS)
+            }
+            AuthFailurePolicy.Decision.CLEAR -> {
+                forbiddenUrl = url
+                secrets.clear()
+                pairedUrl = null
+                unstorableUrl = null
+                events.event("app_auth_revoked", mapOf("url" to UrlRedactor.redactUrl(url)))
+                loadConfiguredUrl()
+            }
         }
     }
 
@@ -314,6 +344,13 @@ class MainActivity : Activity() {
         override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) = onMainFrameUrl(view, url)
 
         override fun onPageFinished(view: WebView, url: String?) = onMainFrameUrl(view, url)
+
+        // Revocation: the server answers 403 for a regenerated token. A 403 is not a load error (onReceivedError).
+        // The count uses only this callback (no ordering against onPageStarted/onPageFinished is assumed).
+        override fun onReceivedHttpError(view: WebView, request: WebResourceRequest, errorResponse: WebResourceResponse) {
+            if (!request.isForMainFrame || view !== webView || errorResponse.statusCode != 403) return
+            onPlayerForbidden(request.url?.toString())
+        }
 
         // R8: one pending retry at a time.
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
@@ -442,6 +479,8 @@ class MainActivity : Activity() {
             secrets.clear()
             pairedUrl = null
             unstorableUrl = null
+            forbiddenUrl = null
+            authFailures.reset()
         }
         if (next != config) {
             if (!store.save(next)) KLog.w("config save did not commit")
