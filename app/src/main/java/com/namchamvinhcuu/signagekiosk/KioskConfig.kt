@@ -10,6 +10,8 @@ data class KioskConfig(
     val baseUrl: String,
     val restartMin: Int,
     val lowMemMb: Int,
+    /** Which release line the TV follows for self-update; [UpdateChannel.OFF] never checks. */
+    val updateChannel: UpdateChannel = UpdateChannel.OFF,
 ) {
     /**
      * False while no server is set. Only then does the exported activity accept the `base_url` intent extra
@@ -72,6 +74,17 @@ object ConfigValidator {
             trimmed
         }
     }
+
+    /** `off`, `stable` or `canary` (trimmed, any case); anything else is rejected (null). */
+    fun normalizeUpdateChannel(raw: String?): UpdateChannel? = UpdateChannel.fromWire(raw)
+
+    /**
+     * The `update_channel` intent extra: like `base_url`, accepted only while the TV is unconfigured. Any app can send
+     * an extra to the exported activity, so a configured TV must not be switched to another release line that way (it
+     * changes from the settings dialog). Null = rejected.
+     */
+    fun acceptIntentUpdateChannel(current: KioskConfig, raw: String?): UpdateChannel? =
+        if (current.isConfigured) null else normalizeUpdateChannel(raw)
 
     /** 0 = off; negative = rejected (null); otherwise clamped to 15..1440. */
     fun normalizeRestartMin(n: Int): Int? = normalize(n, RESTART_MIN_LOW, RESTART_MIN_HIGH)

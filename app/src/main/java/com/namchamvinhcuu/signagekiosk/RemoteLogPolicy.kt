@@ -40,7 +40,9 @@ object RemoteLogPolicy {
     private val TOKEN_IN_TEXT = Regex("(?i)token=[^&\\s\"']*")
     private val URL_IN_TEXT = Regex("(?i)\\bhttps?://[^\\s\"']+")
 
-    fun serverEvent(appEvent: String): String? = MAPPING[appEvent]
+    /** Every `app_update_<stage>` event (self-update) goes out as `watchdog`; the stage is in `data.kind`. */
+    fun serverEvent(appEvent: String): String? =
+        MAPPING[appEvent] ?: if (appEvent.startsWith("app_update_")) "watchdog" else null
 
     /** Where to POST and the token to scrub from the text. [toString] hides both: it may end up in a log line. */
     class Endpoint internal constructor(val url: String, internal val token: String) {

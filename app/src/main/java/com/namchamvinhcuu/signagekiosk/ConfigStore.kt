@@ -15,6 +15,7 @@ class ConfigStore(context: Context) {
             ?: KioskConfig.DEFAULT_RESTART_MIN,
         lowMemMb = ConfigValidator.normalizeLowMemMb(prefs.getInt(K_LOW_MEM_MB, KioskConfig.DEFAULT_LOW_MEM_MB))
             ?: KioskConfig.DEFAULT_LOW_MEM_MB,
+        updateChannel = ConfigValidator.normalizeUpdateChannel(prefs.getString(K_UPDATE_CHANNEL, null)) ?: UpdateChannel.OFF,
     )
 
     /** commit(): a restart may follow right away and must see the new values. */
@@ -22,7 +23,56 @@ class ConfigStore(context: Context) {
         .putString(K_BASE_URL, c.baseUrl)
         .putInt(K_RESTART_MIN, c.restartMin)
         .putInt(K_LOW_MEM_MB, c.lowMemMb)
+        .putString(K_UPDATE_CHANNEL, c.updateChannel.wire)
         .commit()
+
+    // ---- Self-update bookkeeping (see UpdateContract) -------------------------------------------------
+
+    data class UpdateResultRecord(val status: String, val code: Int, val message: String?)
+
+    fun loadUpdateState(): UpdateState = UpdateState(
+        backoffUntilMs = prefs.getLong(K_UPD_BACKOFF_UNTIL, 0L),
+        verifyFailedCode = prefs.getInt(K_UPD_VERIFY_CODE, 0),
+        verifyFailedAtMs = prefs.getLong(K_UPD_VERIFY_AT, 0L),
+    )
+
+    /** Synchronous on purpose: the install may kill the process right after. */
+    fun saveUpdateState(s: UpdateState): Boolean = prefs.edit()
+        .putLong(K_UPD_BACKOFF_UNTIL, s.backoffUntilMs)
+        .putInt(K_UPD_VERIFY_CODE, s.verifyFailedCode)
+        .putLong(K_UPD_VERIFY_AT, s.verifyFailedAtMs)
+        .commit()
+
+    /** The versionCode being installed; read back at the next start to tell "updated" from "never arrived". */
+    fun savePendingUpdateCode(code: Int): Boolean = prefs.edit().putInt(K_UPD_PENDING_CODE, code).commit()
+
+    fun peekPendingUpdateCode(): Int = prefs.getInt(K_UPD_PENDING_CODE, 0)
+
+    /** Returns and clears the pending code (0 = none). */
+    fun takePendingUpdateCode(): Int {
+        val code = prefs.getInt(K_UPD_PENDING_CODE, 0)
+        if (code != 0) prefs.edit().remove(K_UPD_PENDING_CODE).commit()
+        return code
+    }
+
+    /** Status text from the installer, cut to 200 chars; never a URL with a token (the installer knows none). */
+    fun saveUpdateResult(status: String, code: Int, message: String?): Boolean = prefs.edit()
+        .putString(K_UPD_RESULT_STATUS, status)
+        .putInt(K_UPD_RESULT_CODE, code)
+        .putString(K_UPD_RESULT_MSG, message?.take(200))
+        .commit()
+
+    fun peekUpdateResult(): UpdateResultRecord? {
+        val status = prefs.getString(K_UPD_RESULT_STATUS, null) ?: return null
+        return UpdateResultRecord(status, prefs.getInt(K_UPD_RESULT_CODE, 0), prefs.getString(K_UPD_RESULT_MSG, null))
+    }
+
+    /** Returns and clears the stored result, if any (reported once, after the next start). */
+    fun takeUpdateResult(): UpdateResultRecord? {
+        val r = peekUpdateResult() ?: return null
+        prefs.edit().remove(K_UPD_RESULT_STATUS).remove(K_UPD_RESULT_CODE).remove(K_UPD_RESULT_MSG).commit()
+        return r
+    }
 
     /** Synchronous on purpose: the process exits right after this call. */
     fun saveExitReason(reason: String, atWallMs: Long): Boolean = prefs.edit()
@@ -45,6 +95,14 @@ class ConfigStore(context: Context) {
     fun saveBridgeRestartAt(atWallMs: Long): Boolean = prefs.edit().putLong(K_BRIDGE_RESTART_AT, atWallMs).commit()
 
     private companion object {
+        const val K_UPDATE_CHANNEL = "update_channel"
+        const val K_UPD_BACKOFF_UNTIL = "upd_backoff_until"
+        const val K_UPD_VERIFY_CODE = "upd_verify_code"
+        const val K_UPD_VERIFY_AT = "upd_verify_at"
+        const val K_UPD_PENDING_CODE = "upd_pending_code"
+        const val K_UPD_RESULT_STATUS = "upd_result_status"
+        const val K_UPD_RESULT_CODE = "upd_result_code"
+        const val K_UPD_RESULT_MSG = "upd_result_msg"
         const val K_BRIDGE_RESTART_AT = "bridge_restart_at"
         const val K_BASE_URL = "base_url"
         const val K_RESTART_MIN = "restart_min"

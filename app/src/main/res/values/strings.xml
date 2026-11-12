@@ -6,9 +6,11 @@
     <string name="settings_url">Địa chỉ máy chủ (http:// hoặc https://, không kèm tham số)</string>
     <string name="settings_restart_min">Khởi động lại định kỳ (phút; 0 = tắt; 15–1440)</string>
     <string name="settings_low_mem_mb">Ngưỡng bộ nhớ trống để khởi động lại (MB; 0 = tắt; 50–4096)</string>
+    <string name="settings_update_channel">Kênh cập nhật tự động (off = tắt, stable hoặc canary)</string>
     <string name="settings_save">Lưu và tải lại</string>
     <string name="settings_exit">Thoát ứng dụng</string>
     <string name="settings_cancel">Hủy</string>
     <string name="settings_invalid_url">Địa chỉ không hợp lệ: cần bắt đầu bằng http:// hoặc https://, có tên máy chủ, không có tham số (?...) hay phần # .</string>
+    <string name="settings_invalid_update_channel">Kênh cập nhật không hợp lệ: chỉ nhập off, stable hoặc canary.</string>
     <string name="settings_invalid_number">Giá trị số không hợp lệ: chỉ nhập số nguyên từ 0 trở lên.</string>
 </resources>
