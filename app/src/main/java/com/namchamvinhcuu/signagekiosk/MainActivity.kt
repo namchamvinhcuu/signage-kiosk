@@ -363,7 +363,8 @@ class MainActivity : Activity() {
         val rejected = mutableListOf<String>()
         if (intent.hasExtra(EXTRA_BASE_URL)) {
             val url = ConfigValidator.validateBaseUrl(intent.getStringExtra(EXTRA_BASE_URL))
-            if (url == null) rejected += EXTRA_BASE_URL else next = next.copy(baseUrl = url)
+            // A configured TV is changed only from the settings dialog (or by clearing the app data over adb).
+            if (url == null || config.isConfigured) rejected += EXTRA_BASE_URL else next = next.copy(baseUrl = url)
         }
         if (intent.hasExtra(EXTRA_RESTART_MIN)) {
             val n = intExtra(intent, EXTRA_RESTART_MIN)?.let(ConfigValidator::normalizeRestartMin)

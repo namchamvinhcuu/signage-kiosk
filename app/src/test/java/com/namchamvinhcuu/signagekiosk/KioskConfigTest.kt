@@ -1,6 +1,8 @@
 package com.namchamvinhcuu.signagekiosk
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class KioskConfigTest {
@@ -57,5 +59,27 @@ class KioskConfigTest {
         assertEquals("https://signage/pair", ConfigValidator.validateBaseUrl("https://signage/pair"))
         assertEquals("http://signage/pair", ConfigValidator.validateBaseUrl("http://signage/pair/"))
         assertEquals("https://signage", ConfigValidator.validateBaseUrl("https://signage/signage/pair"))
+    }
+
+    // The exported activity takes the base_url extra only while isConfigured is false.
+    @Test
+    fun `a config is unconfigured only while the base url is the blank default`() {
+        assertFalse(KioskConfig.DEFAULT.isConfigured)
+        assertTrue(KioskConfig("http://192.168.1.10:8069", 240, 0).isConfigured)
+        assertTrue(KioskConfig("https://odoo.example.com", 240, 0).isConfigured)
+    }
+
+    @Test
+    fun `isConfigured compares the exact default text only`() {
+        for (v in listOf("", " ", "ABOUT:BLANK", "about:blank/", "about:blank ")) {
+            assertTrue("expected configured for '$v'", KioskConfig(v, 240, 0).isConfigured)
+        }
+        assertFalse(KioskConfig(KioskConfig.DEFAULT_BASE_URL, 1, 1).isConfigured)
+    }
+
+    @Test
+    fun `a LAN ip over http is a valid base url and gives a pair url`() {
+        val base = ConfigValidator.validateBaseUrl("http://192.168.1.10:8069/")!!
+        assertEquals("http://192.168.1.10:8069/signage/pair", KioskConfig(base, 240, 0).pairUrl)
     }
 }

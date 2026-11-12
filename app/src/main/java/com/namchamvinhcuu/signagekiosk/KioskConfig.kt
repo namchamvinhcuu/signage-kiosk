@@ -11,6 +11,13 @@ data class KioskConfig(
     val restartMin: Int,
     val lowMemMb: Int,
 ) {
+    /**
+     * False while no server is set. Only then does the exported activity accept the `base_url` intent extra
+     * (provisioning window): any app can send it, so a configured TV must not be repointed that way.
+     */
+    val isConfigured: Boolean
+        get() = baseUrl != DEFAULT_BASE_URL
+
     /** Page to load: `<base>/signage/pair`, or a blank page while no server is configured. */
     val pairUrl: String
         get() = if (baseUrl == DEFAULT_BASE_URL) DEFAULT_BASE_URL else baseUrl + PAIR_PATH
@@ -50,7 +57,8 @@ object ConfigValidator {
     /**
      * Base URL of the server: an http/https URL with a host and no userinfo, query or fragment; trailing
      * slashes are dropped (a path prefix for a reverse proxy is allowed), and so is a pasted `/signage/pair`
-     * suffix (else the pair URL would double it). Otherwise null (rejected).
+     * suffix (else the pair URL would double it). http stays allowed: internal customers may only have a LAN IP.
+     * Otherwise null (rejected).
      */
     fun validateBaseUrl(raw: String?): String? {
         val s = validateUrl(raw) ?: return null
