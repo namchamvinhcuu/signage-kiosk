@@ -20,4 +20,42 @@ class KioskConfigTest {
     fun `AppStart empty extra still wins over a previous exit reason`() {
         assertEquals(AppStartInfo("", "crash"), AppStart.derive("", "crash"))
     }
+
+    @Test
+    fun `pairUrl appends the pair path to the base url`() {
+        assertEquals("https://odoo.example.com/signage/pair", KioskConfig("https://odoo.example.com", 240, 0).pairUrl)
+        assertEquals("http://h:8069/odoo/signage/pair", KioskConfig("http://h:8069/odoo", 240, 0).pairUrl)
+    }
+
+    @Test
+    fun `pairUrl stays blank while no server is configured`() {
+        assertEquals("about:blank", KioskConfig.DEFAULT.pairUrl)
+    }
+
+    @Test
+    fun `pairUrl of a validated base url has no double slash`() {
+        val base = ConfigValidator.validateBaseUrl("https://odoo.example.com//")!!
+        assertEquals("https://odoo.example.com/signage/pair", KioskConfig(base, 240, 0).pairUrl)
+    }
+
+    @Test
+    fun `a pasted pair url is reduced to its base so the pair path is not doubled`() {
+        for (raw in listOf("https://h/signage/pair", "https://h/signage/pair/", "https://h/odoo/signage/pair")) {
+            val base = ConfigValidator.validateBaseUrl(raw)!!
+            assertEquals(raw.trimEnd('/'), KioskConfig(base, 240, 0).pairUrl)
+        }
+    }
+
+    @Test
+    fun `a pasted pair url on the bare host reduces to its origin`() {
+        assertEquals("https://h", ConfigValidator.validateBaseUrl("https://h/signage/pair"))
+    }
+
+    // Regression: a host literally named `signage` with path `/pair` overlaps the suffix and was cut to `https:`.
+    @Test
+    fun `host named signage with path pair is not mistaken for the pair suffix`() {
+        assertEquals("https://signage/pair", ConfigValidator.validateBaseUrl("https://signage/pair"))
+        assertEquals("http://signage/pair", ConfigValidator.validateBaseUrl("http://signage/pair/"))
+        assertEquals("https://signage", ConfigValidator.validateBaseUrl("https://signage/signage/pair"))
+    }
 }

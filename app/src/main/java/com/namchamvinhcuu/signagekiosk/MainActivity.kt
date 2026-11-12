@@ -86,7 +86,7 @@ class MainActivity : Activity() {
     }
     private val retryLoad = Runnable {
         KLog.i("retrying main-frame load")
-        webView?.loadUrl(config.url)
+        webView?.loadUrl(config.pairUrl)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -218,7 +218,7 @@ class MainActivity : Activity() {
 
     private fun loadConfiguredUrl() {
         handler.removeCallbacks(retryLoad)
-        webView?.loadUrl(config.url)
+        webView?.loadUrl(config.pairUrl)
     }
 
     /** R2: a dead WebView only gets removed and destroyed — nothing else is called on it. */
@@ -357,13 +357,13 @@ class MainActivity : Activity() {
 
     private fun applyIntentConfig(intent: Intent?, reload: Boolean) {
         if (intent == null) return
-        val keys = listOf(EXTRA_URL, EXTRA_RESTART_MIN, EXTRA_LOW_MEM_MB).filter { intent.hasExtra(it) }
+        val keys = listOf(EXTRA_BASE_URL, EXTRA_RESTART_MIN, EXTRA_LOW_MEM_MB).filter { intent.hasExtra(it) }
         if (keys.isEmpty()) return
         var next = config
         val rejected = mutableListOf<String>()
-        if (intent.hasExtra(EXTRA_URL)) {
-            val url = ConfigValidator.validateUrl(intent.getStringExtra(EXTRA_URL))
-            if (url == null) rejected += EXTRA_URL else next = next.copy(url = url)
+        if (intent.hasExtra(EXTRA_BASE_URL)) {
+            val url = ConfigValidator.validateBaseUrl(intent.getStringExtra(EXTRA_BASE_URL))
+            if (url == null) rejected += EXTRA_BASE_URL else next = next.copy(baseUrl = url)
         }
         if (intent.hasExtra(EXTRA_RESTART_MIN)) {
             val n = intExtra(intent, EXTRA_RESTART_MIN)?.let(ConfigValidator::normalizeRestartMin)
@@ -395,7 +395,7 @@ class MainActivity : Activity() {
         forceReload: Boolean,
         reloadAllowed: Boolean = true,
     ) {
-        val urlChanged = next.url != config.url
+        val urlChanged = next.baseUrl != config.baseUrl
         if (next != config) {
             if (!store.save(next)) KLog.w("config save did not commit")
             config = next
@@ -404,7 +404,7 @@ class MainActivity : Activity() {
             "app_config",
             mapOf(
                 "source" to source,
-                "url" to UrlRedactor.redactUrl(next.url),
+                "base_url" to UrlRedactor.redactUrl(next.baseUrl),
                 "restart_min" to next.restartMin,
                 "low_mem_mb" to next.lowMemMb,
                 "url_changed" to urlChanged,
@@ -439,7 +439,7 @@ class MainActivity : Activity() {
     private fun showSettings() {
         if (settingsDialog?.isShowing == true || isFinishing || restarting) return
         val urlInput = EditText(this).apply {
-            setText(config.url)
+            setText(config.baseUrl.takeIf { it != KioskConfig.DEFAULT_BASE_URL }.orEmpty())
             isSingleLine = true
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
         }
@@ -508,7 +508,7 @@ class MainActivity : Activity() {
     private fun label(res: Int) = TextView(this).apply { setText(res) }
 
     private fun saveSettings(urlText: String, restartText: String, lowMemText: String): Boolean {
-        val url = ConfigValidator.validateUrl(urlText)
+        val url = ConfigValidator.validateBaseUrl(urlText)
         if (url == null) {
             Toast.makeText(this, R.string.settings_invalid_url, Toast.LENGTH_LONG).show()
             return false
@@ -539,7 +539,7 @@ class MainActivity : Activity() {
                 "sdk" to Build.VERSION.SDK_INT,
                 "model" to Build.MODEL,
                 "overlay" to Settings.canDrawOverlays(this),
-                "url" to UrlRedactor.redactUrl(config.url),
+                "base_url" to UrlRedactor.redactUrl(config.baseUrl),
                 "restart_min" to config.restartMin,
                 "low_mem_mb" to config.lowMemMb,
                 "version_code" to BuildConfig.VERSION_CODE,
@@ -576,7 +576,7 @@ class MainActivity : Activity() {
     private fun uptimeMs(): Long = SystemClock.elapsedRealtime() - Process.getStartElapsedRealtime()
 
     companion object {
-        const val EXTRA_URL = "url"
+        const val EXTRA_BASE_URL = "base_url"
         const val EXTRA_RESTART_MIN = "restart_min"
         const val EXTRA_LOW_MEM_MB = "low_mem_mb"
         /** Why the activity was started ("boot" from BootReceiver); otherwise derived. */

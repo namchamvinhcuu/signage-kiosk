@@ -10,7 +10,7 @@ class ConfigStore(context: Context) {
 
     /** Stored values go through the same validation as every other source; invalid → default. */
     fun load(): KioskConfig = KioskConfig(
-        url = ConfigValidator.validateUrl(prefs.getString(K_URL, null)) ?: KioskConfig.DEFAULT_URL,
+        baseUrl = ConfigValidator.validateBaseUrl(prefs.getString(K_BASE_URL, null)) ?: KioskConfig.DEFAULT_BASE_URL,
         restartMin = ConfigValidator.normalizeRestartMin(prefs.getInt(K_RESTART_MIN, KioskConfig.DEFAULT_RESTART_MIN))
             ?: KioskConfig.DEFAULT_RESTART_MIN,
         lowMemMb = ConfigValidator.normalizeLowMemMb(prefs.getInt(K_LOW_MEM_MB, KioskConfig.DEFAULT_LOW_MEM_MB))
@@ -19,7 +19,7 @@ class ConfigStore(context: Context) {
 
     /** commit(): a restart may follow right away and must see the new values. */
     fun save(c: KioskConfig): Boolean = prefs.edit()
-        .putString(K_URL, c.url)
+        .putString(K_BASE_URL, c.baseUrl)
         .putInt(K_RESTART_MIN, c.restartMin)
         .putInt(K_LOW_MEM_MB, c.lowMemMb)
         .commit()
@@ -39,7 +39,7 @@ class ConfigStore(context: Context) {
     }
 
     private companion object {
-        const val K_URL = "url"
+        const val K_BASE_URL = "base_url"
         const val K_RESTART_MIN = "restart_min"
         const val K_LOW_MEM_MB = "low_mem_mb"
         const val K_EXIT_REASON = "exit_reason"

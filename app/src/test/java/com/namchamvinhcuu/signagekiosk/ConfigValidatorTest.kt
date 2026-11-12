@@ -28,9 +28,10 @@ class ConfigValidatorTest {
     }
 
     @Test
-    fun `default url is blank and is not a valid server url`() {
-        assertEquals("about:blank", KioskConfig.DEFAULT_URL)
-        assertNull(ConfigValidator.validateUrl(KioskConfig.DEFAULT_URL))
+    fun `default base url is blank and is not a valid server url`() {
+        assertEquals("about:blank", KioskConfig.DEFAULT_BASE_URL)
+        assertNull(ConfigValidator.validateUrl(KioskConfig.DEFAULT_BASE_URL))
+        assertNull(ConfigValidator.validateBaseUrl(KioskConfig.DEFAULT_BASE_URL))
     }
 
     @Test
@@ -125,5 +126,99 @@ class ConfigValidatorTest {
         assertEquals(4096, ConfigValidator.normalizeLowMemMb(4096))
         assertEquals(4096, ConfigValidator.normalizeLowMemMb(4097))
         assertEquals(4096, ConfigValidator.normalizeLowMemMb(Int.MAX_VALUE))
+    }
+
+    // --- validateBaseUrl (server base: no userinfo/query/fragment, trailing slashes dropped) ---
+
+    @Test
+    fun `base url is trimmed and loses trailing slashes`() {
+        assertEquals("https://odoo.example.com", ConfigValidator.validateBaseUrl(" https://odoo.example.com/ \n"))
+        assertEquals("http://h:8069", ConfigValidator.validateBaseUrl("http://h:8069///"))
+    }
+
+    @Test
+    fun `base url keeps a path prefix`() {
+        assertEquals("https://example.com/odoo", ConfigValidator.validateBaseUrl("https://example.com/odoo/"))
+    }
+
+    @Test
+    fun `base url with query fragment or userinfo is rejected`() {
+        for (raw in listOf(
+            "https://h/?token=secret",
+            "https://h/#frag",
+            "https://h/signage/pair?x=1",
+            "https://user:pass@h/",
+            "https://user@h/",
+        )) {
+            assertNull("expected rejection of $raw", ConfigValidator.validateBaseUrl(raw))
+        }
+    }
+
+    @Test
+    fun `base url without a path and with a port or ipv6 host is accepted`() {
+        assertEquals("https://h", ConfigValidator.validateBaseUrl("https://h"))
+        assertEquals("http://10.0.0.5:8069", ConfigValidator.validateBaseUrl("http://10.0.0.5:8069/"))
+        assertEquals("http://[::1]:8069", ConfigValidator.validateBaseUrl("http://[::1]:8069/"))
+    }
+
+    @Test
+    fun `base url keeps uppercase scheme text and percent-encoded path`() {
+        assertEquals("HTTPS://Host:8080/x", ConfigValidator.validateBaseUrl("HTTPS://Host:8080/x/"))
+        assertEquals("https://h/a%20b", ConfigValidator.validateBaseUrl("https://h/a%20b/"))
+    }
+
+    @Test
+    fun `base url with inner whitespace or only a slash path is rejected`() {
+        for (raw in listOf("https://h/a b", "https://h /", "/", "///", "https:///")) {
+            assertNull("expected rejection of $raw", ConfigValidator.validateBaseUrl(raw))
+        }
+    }
+
+    @Test
+    fun `base url with an empty query or empty fragment marker is rejected`() {
+        for (raw in listOf("https://h?", "https://h/#", "https://h?x=1")) {
+            assertNull("expected rejection of $raw", ConfigValidator.validateBaseUrl(raw))
+        }
+    }
+
+    @Test
+    fun `pairUrl of ipv6 port and encoded-path bases`() {
+        assertEquals(
+            "http://[::1]:8069/signage/pair",
+            KioskConfig(ConfigValidator.validateBaseUrl("http://[::1]:8069/")!!, 240, 0).pairUrl,
+        )
+        assertEquals(
+            "https://h/a%20b/signage/pair",
+            KioskConfig(ConfigValidator.validateBaseUrl("https://h/a%20b/")!!, 240, 0).pairUrl,
+        )
+    }
+
+    @Test
+    fun `pair path suffix is stripped only as a whole trailing segment`() {
+        assertEquals("https://h/signage/pairx", ConfigValidator.validateBaseUrl("https://h/signage/pairx"))
+        assertEquals("https://h/signage/pair/x", ConfigValidator.validateBaseUrl("https://h/signage/pair/x/"))
+        assertEquals("https://h/x", ConfigValidator.validateBaseUrl("https://h/x/signage/pair///"))
+    }
+
+    @Test
+    fun `host named signage keeps its path and a doubled pair paste is stripped once`() {
+        assertEquals("http://signage/pair/x", ConfigValidator.validateBaseUrl("http://signage/pair/x"))
+        assertEquals("http://signage:8069", ConfigValidator.validateBaseUrl("http://signage:8069/signage/pair"))
+        assertEquals(
+            "https://h/signage/pair",
+            ConfigValidator.validateBaseUrl("https://h/signage/pair/signage/pair"),
+        )
+    }
+
+    @Test
+    fun `base url with an empty userinfo is rejected`() {
+        assertNull(ConfigValidator.validateBaseUrl("https://@h/"))
+    }
+
+    @Test
+    fun `base url rejects what validateUrl rejects`() {
+        for (raw in listOf(null, "", "  ", "ftp://h/", "javascript:alert(1)", "not a url", "http://", "about:blank")) {
+            assertNull("expected rejection of $raw", ConfigValidator.validateBaseUrl(raw))
+        }
     }
 }
