@@ -1,0 +1,30 @@
+.gradle/
+build/
+/local.properties
+.idea/
+*.iml
+.DS_Store
+captures/
+.externalNativeBuild/
+.cxx/
+*.keystore
+*.jks
+*.p12
+keystore.properties*
+.kotlin/
+# Build outputs, secrets and logs (public repo: never commit tokens or per-site URLs)
+*.apk
+*.aab
+.env
+.env.*
+*.log
+.claude/
+.gemini/
+.vault-portal.conf
+# Claude Code harness (per-machine symlinks / generated)
+.serena/
+.obsidian-vault
+.*-skill
+graphify-out/
+CLAUDE.md
+AGENTS.md
