@@ -29,10 +29,14 @@ class RemoteLogPolicyTest {
     fun `every mapped app event maps into the whitelist and unmapped ones to null`() {
         val mapped = listOf(
             "app_start", "app_status", "app_load_error", "app_render_gone", "app_recreate",
-            "app_hang", "app_restart", "app_trim", "app_refront", "app_error",
+            "app_hang", "app_restart", "app_trim", "app_refront", "app_front", "app_error",
         )
         for (e in mapped) assertTrue(e, RemoteLogPolicy.serverEvent(e) in RemoteLogPolicy.SERVER_EVENTS)
         assertEquals("boot", RemoteLogPolicy.serverEvent("app_start"))
+        assertEquals("watchdog", RemoteLogPolicy.serverEvent("app_front"))
+        assertNull(RemoteLogPolicy.serverEvent("app_front_x")) // exact match, not a prefix
+        assertNull(RemoteLogPolicy.serverEvent("app_fronts"))
+        assertNull(RemoteLogPolicy.serverEvent("front"))
         assertNull(RemoteLogPolicy.serverEvent("app_unknown"))
         assertNull(RemoteLogPolicy.serverEvent(""))
         assertNull(RemoteLogPolicy.serverEvent("boot")) // a server event name is not an app event

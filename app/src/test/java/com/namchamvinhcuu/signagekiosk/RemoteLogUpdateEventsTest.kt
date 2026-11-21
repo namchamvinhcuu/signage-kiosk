@@ -32,7 +32,8 @@ class RemoteLogUpdateEventsTest {
         val expected = mapOf(
             "app_start" to "boot", "app_status" to "heartbeat", "app_load_error" to "http_error",
             "app_render_gone" to "watchdog", "app_recreate" to "watchdog", "app_hang" to "watchdog",
-            "app_restart" to "watchdog", "app_trim" to "watchdog", "app_refront" to "watchdog", "app_error" to "watchdog",
+            "app_restart" to "watchdog", "app_trim" to "watchdog", "app_refront" to "watchdog", "app_front" to "watchdog",
+            "app_error" to "watchdog",
         )
         for ((k, v) in expected) assertEquals(k, v, RemoteLogPolicy.serverEvent(k))
         assertNull(RemoteLogPolicy.serverEvent("app_auth_403"))

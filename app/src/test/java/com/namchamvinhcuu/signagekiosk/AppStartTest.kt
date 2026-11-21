@@ -43,6 +43,47 @@ class AppStartTest {
         assertEquals(AppStartInfo("boot", "periodic", true), AppStart.derive("boot", "periodic", 7, 5))
     }
 
+    // ---- frontMark (plan kiosk-frontwatch AC1)
+
+    @Test
+    fun `frontMark alone is a front_watch start`() {
+        assertEquals(AppStartInfo("front_watch", null, false), AppStart.derive(null, null, frontMark = true))
+    }
+
+    @Test
+    fun `frontMark wins over a replayed extra start`() {
+        assertEquals(AppStartInfo("front_watch", null, false), AppStart.derive("boot", null, frontMark = true))
+        assertEquals(AppStartInfo("front_watch", null, false), AppStart.derive("update", null, frontMark = true))
+    }
+
+    @Test
+    fun `frontMark wins over a pending update equal to the running version and prevReason stays update_N`() {
+        assertEquals(AppStartInfo("front_watch", "update_5", false), AppStart.derive(null, null, 5, 5, frontMark = true))
+        assertEquals(AppStartInfo("front_watch", "update_5", false), AppStart.derive("update", "periodic", 5, 5, true))
+    }
+
+    @Test
+    fun `frontMark keeps the exit reason as prevReason`() {
+        assertEquals(AppStartInfo("front_watch", "periodic", false), AppStart.derive(null, "periodic", frontMark = true))
+        assertEquals(AppStartInfo("front_watch", "crash", false), AppStart.derive("boot", "crash", 0, 0, true))
+    }
+
+    @Test
+    fun `frontMark keeps pendingNotInstalled`() {
+        assertEquals(AppStartInfo("front_watch", "periodic", true), AppStart.derive(null, "periodic", 7, 5, frontMark = true))
+        assertEquals(AppStartInfo("front_watch", null, true), AppStart.derive("update", null, 7, 5, frontMark = true))
+    }
+
+    @Test
+    fun `frontMark false behaves exactly as before`() {
+        assertEquals(AppStart.derive(null, null), AppStart.derive(null, null, frontMark = false))
+        assertEquals(AppStartInfo("launch", null, false), AppStart.derive(null, null, 0, 0, false))
+        assertEquals(AppStartInfo("restart", "periodic", false), AppStart.derive(null, "periodic", 0, 0, false))
+        assertEquals(AppStartInfo("boot", "periodic", false), AppStart.derive("boot", "periodic", 0, 0, false))
+        assertEquals(AppStartInfo("update", "update_5", false), AppStart.derive(null, "periodic", 5, 5, false))
+        assertEquals(AppStartInfo("restart", "periodic", true), AppStart.derive(null, "periodic", 7, 5, false))
+    }
+
     @Test
     fun `pending zero is never an update`() {
         assertEquals(AppStartInfo("launch", null, false), AppStart.derive(null, null, 0, 5))

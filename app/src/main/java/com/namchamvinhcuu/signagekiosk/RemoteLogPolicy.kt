@@ -34,6 +34,7 @@ object RemoteLogPolicy {
         "app_restart" to "watchdog",
         "app_trim" to "watchdog",
         "app_refront" to "watchdog",
+        "app_front" to "watchdog",
         "app_error" to "watchdog",
     )
 

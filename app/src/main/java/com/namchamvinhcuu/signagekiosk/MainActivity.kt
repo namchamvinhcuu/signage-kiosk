@@ -90,6 +90,8 @@ class MainActivity : Activity() {
     private var refrontTried = false
     /** elapsedRealtime of the self-start, 0 = none pending. */
     private var refrontAtMs = 0L
+    /** elapsedRealtime of the last onStop of this Activity instance; null = never stopped (see [FrontWatchPolicy.sinceAwayMs]). */
+    private var awayAtMs: Long? = null
 
     private val watchdogTick = object : Runnable {
         override fun run() {
@@ -153,12 +155,16 @@ class MainActivity : Activity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        // An alive-process re-front arrives here, not in onCreate: take the mark so it stays single use.
+        takeFrontMark()
         applyIntentConfig(intent, reload = true)
     }
 
     override fun onStart() {
         super.onStart()
         started = true
+        FrontWatch.visible = true
+        FrontWatch.cancel(this)
         webView?.onResume()
         // First start, or the renderer died / a recreate was pending while stopped.
         if (webView == null) createWebView()
@@ -171,9 +177,32 @@ class MainActivity : Activity() {
             events.event("app_refront", mapOf("stage" to "back", "since_attempt_ms" to SystemClock.elapsedRealtime() - refrontAtMs))
             refrontAtMs = 0L
         }
+        // Only a return caused by FrontWatch (mark taken for this start), not boot / manual launch / standby wake.
+        // Taken here too: an alive-process re-front that only brings the task to front (START_TASK_TO_FRONT) delivers
+        // NO onNewIntent (measured on the API 36 AVD), so onCreate/onNewIntent never saw the mark.
+        takeFrontMark()
+        if (FrontWatch.takenForStart) {
+            FrontWatch.takenForStart = false
+            events.event(
+                "app_front",
+                mapOf("stage" to "back", "since_away_ms" to FrontWatchPolicy.sinceAwayMs(awayAtMs, SystemClock.elapsedRealtime())),
+            )
+        }
+    }
+
+    /** True once if FrontWatch started this activity; remembers it for [onStart]'s `app_front` event. */
+    private fun takeFrontMark(): Boolean {
+        val taken = FrontStartMark.take(SystemClock.elapsedRealtime())
+        if (taken) FrontWatch.takenForStart = true
+        return taken
     }
 
     override fun onStop() {
+        // First, like `started`: a later throw in this method must not leave `visible` true (the alarm would be skipped).
+        FrontWatch.visible = false
+        FrontWatch.takenForStart = false
+        awayAtMs = SystemClock.elapsedRealtime()
+        FrontWatch.arm(this)
         started = false
         handler.removeCallbacks(watchdogTick)
         handler.removeCallbacks(statusTick)
@@ -821,7 +850,10 @@ class MainActivity : Activity() {
         // The pending update code belongs to the previous PROCESS: a same-process re-create must not consume it.
         val pendingUpdate = if (processStartLogged) 0 else store.takePendingUpdateCode()
         processStartLogged = true
-        val info = AppStart.derive(intent?.getStringExtra(EXTRA_START), prev?.reason, pendingUpdate, BuildConfig.VERSION_CODE)
+        val info = AppStart.derive(
+            intent?.getStringExtra(EXTRA_START), prev?.reason, pendingUpdate, BuildConfig.VERSION_CODE,
+            frontMark = takeFrontMark(),
+        )
         events.event(
             "app_start",
             mapOf(
