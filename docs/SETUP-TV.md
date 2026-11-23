@@ -54,7 +54,9 @@ requirements per TV:
 lines per second) and the app lines roll out within minutes, so start a live capture to a file BEFORE the event:
 `adb logcat -b all -v time SignageKiosk:V '*:S' > boot.log`. Turning the TV on from standby is NOT a boot (the process keeps running,
 measured on the TCL). A power cut (cable pulled, TV switched on with the remote) was measured once on the TCL: the app came
-up by itself in under a minute; a power cut on the Samsung is not measured.
+up by itself in under a minute. On the Samsung (boot receiver only, our service disabled) a power cut also worked and the TV
+powers on by itself when the cable is plugged in: the log shows `boot completed ... starting MainActivity` about 2 minutes
+after power was restored (slower than the TCL), 0 background-start aborts.
 
 ## 5. Things that go wrong
 - `pm clear` wipes the pairing, the channel and the update backoff (pair again). Never `pm clear` or force-stop while an install
