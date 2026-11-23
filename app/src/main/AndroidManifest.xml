@@ -46,6 +46,22 @@
             android:process=":restart"
             android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
+        <!-- Start-after-boot helper (experiment, TCL: BootReceiver's activity start is blocked because the TV resets the
+             overlay appop). Bound by the system, so only the system may bind it (BIND_ACCESSIBILITY_SERVICE);
+             exported is required for that bind. Reads no events and no window content. Enabled per TV over adb. -->
+        <service
+            android:name=".KioskStartService"
+            android:exported="true"
+            android:label="@string/kiosk_start_service_label"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/kiosk_start_service" />
+        </service>
+
         <!-- BOOT_COMPLETED is sent by the system uid, which reaches non-exported receivers. -->
         <receiver
             android:name=".BootReceiver"
